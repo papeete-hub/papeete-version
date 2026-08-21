@@ -179,8 +179,53 @@ actors are unrelated numbers. `papeete-version --version` prints the former.
 
 ## Releasing
 
-Not set up yet — this package has never been published. See `papeete-actor`'s own README for the
-PyPI Trusted Publishing recipe this repo would reuse when that becomes worth doing.
+Tag-triggered, via [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC).
+**No API token is stored anywhere** — GitHub mints a short-lived OIDC token per run and PyPI trades
+it for an upload token. There is nothing to rotate and nothing to leak.
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0     # .github/workflows/release.yml does the rest
+```
+
+### One-time setup — reused from `papeete-actor`'s recipe
+
+**1. A pending publisher on PyPI** — not yet registered. The project doesn't exist on PyPI yet, so
+it's registered from the publisher side rather than by a first manual upload. At
+<https://pypi.org/manage/account/publishing/>, as a **GitHub** pending publisher:
+
+| Field | Value |
+|---|---|
+| PyPI Project Name | `papeete-version` |
+| Owner | `papeete-hub` |
+| Repository name | `papeete-version` |
+| Workflow name | `release.yml` |
+| Environment name | `pypi` |
+
+All five must match exactly — PyPI checks the OIDC claims against them and rejects the upload
+otherwise. `release.yml` already declares `permissions: id-token: write` and
+`environment: pypi`, which is what makes those claims present. This step needs a human with a PyPI
+account and can't be done from the repo itself.
+
+**2. The `pypi` GitHub environment.** No secrets in it — it exists so the OIDC claim carries an
+environment name for PyPI to match. Protection rules are **not** set and are worth considering,
+because a release is irreversible: PyPI never allows re-uploading a version, even after a delete.
+Required reviewers, and restricting deployments to tags matching `v*`, are the two that earn their
+keep.
+
+**A private repo is fine.** Trusted Publishing authenticates the *workflow*, not the source, so
+nothing here needs to be public for the package to be.
+
+After the first successful release PyPI converts the pending publisher into a normal one
+automatically; there is no second setup step.
+
+**Nothing has been published yet.** `papeete-version` is unclaimed on PyPI and the release lane has
+never run.
+
+### What a release asserts
+
+The workflow builds, installs the wheel into a clean venv, and computes a version for a throwaway
+tagged git repo before publishing — so a build whose entry point is broken fails the release
+instead of shipping something that can't actually compute anything.
 
 ## Licence
 
