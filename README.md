@@ -118,15 +118,30 @@ if version matches [0-9a-f]{7,40}:
 # otherwise `version` is an npm-style range
 if npm_range.satisfies(semver_core(live), version):
     return live
-elif current_version is not None and npm_range.satisfies(semver_core(current_version), version):
+elif (current_version is not None
+      and label_of(current_version) == expected_label(label, feature_name)
+      and npm_range.satisfies(semver_core(current_version), version)):
     return current_version
 else:
     ERROR
 ```
 
 `semver_core(v)` = the `X.Y.Z` before the first `-` in a version string (or the whole string if
-there is no `-`). There is no other fallback: a version this algorithm can't stand behind (via
-`live` or `current_version`) is never fabricated, averaged, or guessed.
+there is no `-`). `label_of(v)` = everything between the semver core and the trailing shortSha
+(a feature name may itself contain dashes, so this splits from the *right*, taking the last `-`
+as the shortSha boundary — not the first); `None` for a bare `X.Y.Z` with no label at all.
+`expected_label(label, feature_name)` = `None` for `prod`, `feature_name` for `feature`, `label`
+itself otherwise.
+
+**The label has to be embodied, not just the semver.** A `beta` query never falls back to a
+`current_version` labelled `alpha` (or anything else), even if its semver satisfies the range
+requested — and a `feature` query requires `current_version`'s label to be *this feature's name*
+exactly, not merely present. `live` never has this problem — its label is always built from the
+`label`/`feature_name` you passed in, so it inherently already embodies the right ciType. This
+check exists purely to keep `current_version` from smuggling in a version that doesn't.
+
+There is no other fallback: a version this algorithm can't stand behind (via `live` or
+`current_version`) is never fabricated, averaged, or guessed.
 
 ### npm-range grammar accepted by `--version` (and nowhere else)
 

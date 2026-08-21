@@ -152,3 +152,47 @@ def test_match_version_npm_range_fails_when_nothing_satisfies(tmp_path):
     with pytest.raises(ValueError, match="neither the live version"):
         version.match_version(folder, "Archivist", "alpha", "^5.0.0",
                                current_version="1.5.0-alpha-abc0000")
+
+
+def test_match_version_never_falls_back_to_a_current_version_with_a_different_citype(tmp_path):
+    """A beta query must not accept an alpha current_version, even if its semver satisfies the
+    range — the label has to be embodied, not just the semver."""
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    with pytest.raises(ValueError, match="neither the live version"):
+        version.match_version(folder, "Archivist", "beta", "^1.0.0",
+                               current_version="1.5.0-alpha-abc0000")
+
+
+def test_match_version_feature_never_falls_back_to_a_current_version_from_another_feature(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    with pytest.raises(ValueError, match="neither the live version"):
+        version.match_version(folder, "Archivist", "feature", "^1.0.0",
+                               feature_name="my-branch",
+                               current_version="1.5.0-some-other-branch-abc0000")
+
+
+def test_match_version_feature_falls_back_when_the_current_version_is_the_same_feature(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    assert version.match_version(folder, "Archivist", "feature", "^1.0.0",
+                                  feature_name="my-branch",
+                                  current_version="1.5.0-my-branch-abc0000") == "1.5.0-my-branch-abc0000"
+
+
+def test_match_version_prod_never_falls_back_to_a_labelled_current_version(tmp_path):
+    """`prod` expects a bare X.Y.Z current_version (no label) — anything with a label attached
+    doesn't embody GA, no matter its semver."""
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    with pytest.raises(ValueError, match="neither the live version"):
+        version.match_version(folder, "Archivist", "prod", "^1.0.0",
+                               current_version="1.5.0-alpha-abc0000")
+
+
+def test_match_version_prod_falls_back_to_a_bare_current_version(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    assert version.match_version(folder, "Archivist", "prod", "^1.0.0",
+                                  current_version="1.5.0") == "1.5.0"

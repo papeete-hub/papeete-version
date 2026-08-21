@@ -3,8 +3,11 @@
 VERSION IS COMPUTED, NEVER DECLARED — nothing here reads or writes a declared `version:` field
 anywhere. The semver core comes from the actor's own nearest matching git tag
 (`<name>/vX.Y.Z` — GitVersion-style), the short SHA from the folder's own last touching commit,
-and the label is an uninterpreted string the caller supplies — strict on the three-part shape,
-silent on what a label MEANS, because that taxonomy (dev/rc/staging/GA/...) isn't decided yet.
+and the label is a ciType (`alpha`/`beta`/`prod`/`feature`, `ADR-PV-0002`) — `prod` IS GA and
+drops the label and shortSha entirely, `feature` prints its own `--feature-name` instead of the
+literal word `feature`, because the label is meant to be embodied, not just decorative:
+`match_version()` treats a `current_version` whose label doesn't match the requested ciType (or
+feature name) as not a candidate at all, regardless of what its semver core says.
 
 Ported from `papeete-actor`'s `build.py` (`ADR-PA-0022`, `ADR-PA-0023`) — see this repo's own
 `ADR-PV-0001` for why the computation lives here now, standalone, with nothing Docker-shaped
@@ -115,6 +118,25 @@ def _semver_core_of(computed_version: str) -> npm_range.SemVer:
     return npm_range.parse_semver(computed_version.split("-", 1)[0])
 
 
+def _label_of(computed_version: str) -> str | None:
+    """The label a full computed version string carries — everything between the semver core and
+    the trailing shortSha, dashes and all (a feature name may itself contain dashes, but the
+    shortSha never does, so splitting from the right is unambiguous). `None` for a bare `X.Y.Z`
+    (the `prod`/GA shape) or anything else too short to carry a label."""
+    parts = computed_version.split("-")
+    if len(parts) < 3:
+        return None
+    return "-".join(parts[1:-1])
+
+
+def _expected_label(label: str, feature_name: str | None) -> str | None:
+    """What `_label_of()` must equal for a version to actually embody this ciType — `None` for
+    `prod`, since GA carries no label at all."""
+    if label == "prod":
+        return None
+    return feature_name if label == "feature" else label
+
+
 def match_version(
     folder: Path | str, name: str, label: str, version: str,
     feature_name: str | None = None, current_version: str | None = None,
@@ -127,7 +149,10 @@ def match_version(
       - a short SHA — the live version, if its own short SHA equals this one exactly.
       - an npm-style range (`^1.2.3`, `~1.2`, `1.x`, `1.2.3`, `>=1.0.0`, ...) — the live version if
         its semver core satisfies the range; otherwise `current_version`, carried forward
-        unchanged, if THAT satisfies the range instead.
+        unchanged, if THAT satisfies the range AND actually embodies this ciType — an `alpha`
+        query never falls back to a `beta` (or `feature`-named) `current_version` just because its
+        semver happens to fit, and a `feature` query requires `current_version`'s own label to be
+        THIS feature's name exactly, not merely present.
 
     Anything else is a hard failure — same no-fallback discipline as `compute()`: a version this
     function can't stand behind is never fabricated or silently substituted.
@@ -147,9 +172,12 @@ def match_version(
 
     if npm_range.satisfies(_semver_core_of(live), version):
         return live
-    if current_version is not None and npm_range.satisfies(_semver_core_of(current_version), version):
+    expected_label = _expected_label(label, feature_name)
+    if (current_version is not None
+            and _label_of(current_version) == expected_label
+            and npm_range.satisfies(_semver_core_of(current_version), version)):
         return current_version
     raise ValueError(
         f"{folder}: neither the live version ('{live}') nor current_version "
-        f"('{current_version}') satisfies '{version}'"
+        f"('{current_version}') satisfies '{version}' for ciType '{label}'"
     )

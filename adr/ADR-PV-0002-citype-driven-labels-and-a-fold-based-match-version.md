@@ -40,10 +40,18 @@ exactly like `compute()`, then resolves the `version` query against it:
 - `"latest"` → the live version, always; `current_version` never matters.
 - a short SHA → the live version, only if its own short SHA matches exactly.
 - an npm-style range → the live version if it satisfies the range, else `current_version`
-  (the fold's accumulator, supplied by the caller) if *that* satisfies it instead.
+  (the fold's accumulator, supplied by the caller) if *that* satisfies it AND carries the same
+  label the query asked for.
 
 Anything satisfying neither is a hard failure — same no-fallback discipline as the rest of this
 package.
+
+**`current_version` must embody the requested ciType, not just fit the semver range.** A `beta`
+query never accepts a `current_version` labelled `alpha` (or anything else) as its fallback, even
+if the semver satisfies the range — and a `feature` query requires `current_version`'s label to
+be *this feature's name* exactly. `live` never has this problem, since it's always built from the
+`label`/`feature_name` the caller passed in; the check exists solely to stop `current_version`
+from smuggling in a version that doesn't actually match the ciType being asked for.
 
 **A minimal, hand-rolled npm-range subset (`npm_range.py`), no new dependency.** Supports X-ranges
 (`1`, `1.2`, `1.2.x`, `*`), tilde, caret, single comparators (`>=`/`<=`/`>`/`<`/`=`), and exact
