@@ -77,4 +77,78 @@ def test_compute_composes_semver_label_and_short_sha(tmp_path):
     folder = tmp_path / "archivist"
     _init_actor_repo(folder, "Archivist", tag="2.2.0")
     sha = version.git_version(folder)
-    assert version.compute(folder, "Archivist", "dev") == f"2.2.0-dev-{sha}"
+    assert version.compute(folder, "Archivist", "alpha") == f"2.2.0-alpha-{sha}"
+
+
+def test_compute_rejects_an_unknown_citype(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    with pytest.raises(ValueError, match="not a ciType"):
+        version.compute(folder, "Archivist", "dev")
+
+
+def test_compute_prod_is_ga_semver_only(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    assert version.compute(folder, "Archivist", "prod") == "2.2.0"
+
+
+def test_compute_feature_uses_the_feature_name_as_its_label(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    sha = version.git_version(folder)
+    assert (version.compute(folder, "Archivist", "feature", feature_name="my-branch")
+            == f"2.2.0-my-branch-{sha}")
+
+
+def test_compute_feature_without_a_feature_name_fails_clearly(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    with pytest.raises(ValueError, match="requires a feature name"):
+        version.compute(folder, "Archivist", "feature")
+
+
+def test_match_version_latest_ignores_current_version(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    live = version.compute(folder, "Archivist", "alpha")
+    assert version.match_version(folder, "Archivist", "alpha", "latest",
+                                  current_version="9.9.9-alpha-deadbeef") == live
+
+
+def test_match_version_by_shortsha_matches_the_live_commit(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    sha = version.git_version(folder)
+    live = version.compute(folder, "Archivist", "alpha")
+    assert version.match_version(folder, "Archivist", "alpha", sha) == live
+
+
+def test_match_version_by_shortsha_fails_on_mismatch(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    with pytest.raises(ValueError, match="does not match requested"):
+        version.match_version(folder, "Archivist", "alpha", "0000000")
+
+
+def test_match_version_npm_range_prefers_the_live_version_when_it_satisfies(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    live = version.compute(folder, "Archivist", "alpha")
+    assert version.match_version(folder, "Archivist", "alpha", "^2.0.0",
+                                  current_version="2.1.0-alpha-abc0000") == live
+
+
+def test_match_version_npm_range_falls_back_to_current_version(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    assert version.match_version(folder, "Archivist", "alpha", "^1.0.0",
+                                  current_version="1.5.0-alpha-abc0000") == "1.5.0-alpha-abc0000"
+
+
+def test_match_version_npm_range_fails_when_nothing_satisfies(tmp_path):
+    folder = tmp_path / "archivist"
+    _init_actor_repo(folder, "Archivist", tag="2.2.0")
+    with pytest.raises(ValueError, match="neither the live version"):
+        version.match_version(folder, "Archivist", "alpha", "^5.0.0",
+                               current_version="1.5.0-alpha-abc0000")

@@ -14,6 +14,11 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import npm_range
+
+CI_TYPES = ("alpha", "beta", "prod", "feature")
+_SHORTSHA = re.compile(r"^[0-9a-f]{7,40}$")
+
 
 def normalize_name(name: str) -> str:
     """An actor's name, normalized to a DNS-safe, git-tag-safe form."""
@@ -82,8 +87,69 @@ def semver_base(folder: Path | str, name: str) -> str:
     return core
 
 
-def compute(folder: Path | str, name: str, label: str) -> str:
-    """The full version string an actor answers to: `{semver}-{label}-{shortSha}` — semver core
-    from `semver_base()`, short SHA from `git_version()`, label exactly as the caller supplied
-    it, uninterpreted."""
-    return f"{semver_base(folder, name)}-{label}-{git_version(folder)}"
+def compute(folder: Path | str, name: str, label: str, feature_name: str | None = None) -> str:
+    """The full version string an actor answers to.
+
+    `label` is a ciType, not a free-form string anymore: `alpha`, `beta`, `feature` are
+    pre-release and print `{semver}-{label}-{shortSha}` — `label` being the ciType itself, or
+    `feature_name` (a named label, e.g. the feature branch's own name) when the ciType is
+    `feature`. `prod` IS GA: semver-only, no label or shortSha suffix, just `{semver}` — see this
+    package's own notes on the alpha/beta/feature/GA progression.
+    """
+    if label not in CI_TYPES:
+        raise ValueError(f"'{label}' is not a ciType papeete-version knows — one of "
+                          f"{', '.join(CI_TYPES)}")
+    if label == "feature" and not feature_name:
+        raise ValueError("ciType 'feature' requires a feature name (--feature-name)")
+
+    base = semver_base(folder, name)
+    if label == "prod":
+        return base
+    resolved_label = feature_name if label == "feature" else label
+    return f"{base}-{resolved_label}-{git_version(folder)}"
+
+
+def _semver_core_of(computed_version: str) -> npm_range.SemVer:
+    """The `(major, minor, patch)` a full computed version string (or a bare `X.Y.Z`) leads with —
+    `compute()`'s output always has the semver core first, dash-separated from the rest."""
+    return npm_range.parse_semver(computed_version.split("-", 1)[0])
+
+
+def match_version(
+    folder: Path | str, name: str, label: str, version: str,
+    feature_name: str | None = None, current_version: str | None = None,
+) -> str:
+    """Fold a `version` query against what git says right now for this actor, `current_version`
+    being the accumulator — whatever the caller already had from a previous call.
+
+    `version` is one of:
+      - `"latest"` — always the live version, freshly recomputed; `current_version` never matters.
+      - a short SHA — the live version, if its own short SHA equals this one exactly.
+      - an npm-style range (`^1.2.3`, `~1.2`, `1.x`, `1.2.3`, `>=1.0.0`, ...) — the live version if
+        its semver core satisfies the range; otherwise `current_version`, carried forward
+        unchanged, if THAT satisfies the range instead.
+
+    Anything else is a hard failure — same no-fallback discipline as `compute()`: a version this
+    function can't stand behind is never fabricated or silently substituted.
+    """
+    live = compute(folder, name, label, feature_name)
+
+    if version == "latest":
+        return live
+
+    if _SHORTSHA.match(version):
+        sha = git_version(folder)
+        if sha == version or sha.startswith(version):
+            return live
+        raise ValueError(
+            f"{folder}: live short SHA '{sha}' does not match requested '{version}'"
+        )
+
+    if npm_range.satisfies(_semver_core_of(live), version):
+        return live
+    if current_version is not None and npm_range.satisfies(_semver_core_of(current_version), version):
+        return current_version
+    raise ValueError(
+        f"{folder}: neither the live version ('{live}') nor current_version "
+        f"('{current_version}') satisfies '{version}'"
+    )
