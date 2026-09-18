@@ -21,6 +21,14 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 papeete-version = "papeete_version.cli:main"
 
+[[tool.uv.index]]
+# The organization's only index. `default = true` replaces PyPI rather than adding to it: an extra
+# index would leave two answers for a name, which is what dependency confusion needs.
+name = "papeete"
+url = "https://pkgs.dev.azure.com/papeete-consulting/_packaging/papeete-python/pypi/simple/"
+publish-url = "https://pkgs.dev.azure.com/papeete-consulting/_packaging/papeete-python/pypi/upload/"
+default = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

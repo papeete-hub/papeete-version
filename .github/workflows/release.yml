@@ -3,9 +3,10 @@ on:
   push:
     tags: ["v*"]
 
-# PyPI Trusted Publishing (OIDC) — no token is stored anywhere. The one-time setup is a pending
-# publisher on pypi.org naming this repo and this workflow; after the first release it becomes a
-# normal publisher. See README.
+# Federated to Entra and then to the organization's Azure Artifacts feed — no token is stored
+# anywhere. The feed's publishing identity trusts subjects of the form
+# repo:papeete-hub/*:environment:azure-artifacts, and it is the azure-artifacts environment's own
+# v* tag rule that confines a release to a tag, since the subject carries no ref. See README.
 permissions:
   id-token: write
   contents: read
@@ -13,13 +14,35 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: azure-artifacts
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_ARTIFACTS_PUBLISH_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          # This identity holds no subscription — it exists only to reach Azure DevOps.
+          allow-no-subscriptions: true
+
+      - name: mint a feed token
+        # One Entra token, valid for an hour, used both to resolve and to publish. 499b84ac-… is
+        # the Entra application id of Azure DevOps, the same constant in every tenant.
+        run: |
+          token=$(az account get-access-token \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv)
+          echo "::add-mask::$token"
+          {
+            echo "UV_INDEX_PAPEETE_USERNAME=dummy"
+            echo "UV_INDEX_PAPEETE_PASSWORD=$token"
+            echo "UV_PUBLISH_USERNAME=dummy"
+            echo "UV_PUBLISH_PASSWORD=$token"
+          } >> "$GITHUB_ENV"
+
       - name: build
-        # No fetch step and no external token: the contract is committed here. A release
-        # depends on nothing but this checkout and PyPI.
+        # No fetch step and no stored token: the contract is committed here. A release depends on
+        # nothing but this checkout and the feed.
         run: uv build
       - name: verify the wheel actually computes a version
         run: |
@@ -30,5 +53,7 @@ jobs:
           git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
           git tag probe/v0.1.0
           test "$(/tmp/probe/bin/papeete-version compute . --name probe --label prod)" = "0.1.0"
-      - name: publish to PyPI
-        run: uv publish --trusted-publishing always
+      - name: publish to the papeete feed
+        # --index rather than --publish-url: it derives the check URL too, which makes an identical
+        # re-upload a no-op instead of a rejection.
+        run: uv publish --index papeete

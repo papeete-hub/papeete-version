@@ -189,52 +189,45 @@ decision, not part of standing this repo up.
 
 ## Versioning
 
-The tool's own version (this package, on PyPI) and the version strings it *computes* for other
+The tool's own version (this package, on the organization's feed) and the version strings it *computes* for other
 actors are unrelated numbers. `papeete-version --version` prints the former.
 
 ## Releasing
 
-Tag-triggered, via [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC).
-**No API token is stored anywhere** — GitHub mints a short-lived OIDC token per run and PyPI trades
-it for an upload token. There is nothing to rotate and nothing to leak.
+Tag-triggered, publishing to the organization's private **Azure Artifacts** feed rather than to
+public PyPI ([ADR-PL-0005](https://github.com/papeete-hub/papeete-platform/blob/main/adr/ADR-PL-0005-the-python-index-is-a-private-feed-that-proxies-pypi.md)).
+**No API token is stored anywhere**, as before — the mechanism is just longer: GitHub mints an OIDC
+token per run, Entra trades it for an access token because a federated credential matches the run's
+subject, and the feed accepts that token as a password valid for an hour.
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0     # .github/workflows/release.yml does the rest
+git tag v0.1.2 && git push origin v0.1.2     # .github/workflows/release.yml does the rest
 ```
 
-### One-time setup — reused from `papeete-actor`'s recipe
+### What has to be in place
 
-**1. A pending publisher on PyPI** — not yet registered. The project doesn't exist on PyPI yet, so
-it's registered from the publisher side rather than by a first manual upload. At
-<https://pypi.org/manage/account/publishing/>, as a **GitHub** pending publisher:
+**The `azure-artifacts` environment**, with a deployment rule restricting it to tags matching `v*`.
+That rule is not decoration: the federated credential matches
+`repo:papeete-hub/*:environment:azure-artifacts`, and an environment-scoped subject carries no ref —
+so without the tag rule, any run that names the environment could publish. The environment holds no
+secrets.
 
-| Field | Value |
-|---|---|
-| PyPI Project Name | `papeete-version` |
-| Owner | `papeete-hub` |
-| Repository name | `papeete-version` |
-| Workflow name | `release.yml` |
-| Environment name | `pypi` |
+**Three variables**, `AZURE_ARTIFACTS_PUBLISH_CLIENT_ID`, `AZURE_ARTIFACTS_CONSUME_CLIENT_ID` and
+`AZURE_TENANT_ID`. Client ids and a tenant id are public identifiers, not secrets — they name an
+identity that only a token federated from a matching workflow can assume.
 
-All five must match exactly — PyPI checks the OIDC claims against them and rejects the upload
-otherwise. `release.yml` already declares `permissions: id-token: write` and
-`environment: pypi`, which is what makes those claims present. This step needs a human with a PyPI
-account and can't be done from the repo itself.
+**Nothing on the PyPI side.** There is no pending publisher to register and no per-project setup: one
+feed identity covers every repository in the organization, because the credential matches a pattern
+rather than a repository.
 
-**2. The `pypi` GitHub environment.** No secrets in it — it exists so the OIDC claim carries an
-environment name for PyPI to match. Protection rules are **not** set and are worth considering,
-because a release is irreversible: PyPI never allows re-uploading a version, even after a delete.
-Required reviewers, and restricting deployments to tags matching `v*`, are the two that earn their
-keep.
+### The versions already on PyPI
 
-**A private repo is fine.** Trusted Publishing authenticates the *workflow*, not the source, so
-nothing here needs to be public for the package to be.
+`papeete-version` 0.1.0 and 0.1.1 are on pypi.org and stay there — deleting them would free the name
+for anyone to re-register, which is the worst outcome available. They are also cached in the feed, so
+anything pinning them still resolves through it.
 
-After the first successful release PyPI converts the pending publisher into a normal one
-automatically; there is no second setup step.
-
-**Nothing has been published yet.** `papeete-version` is unclaimed on PyPI and the release lane has
-never run.
+From 0.1.2 onward, releases go to the feed only. A consumer that still points at pypi.org will keep
+resolving 0.1.1 and silently stop seeing new versions.
 
 ### What a release asserts
 
