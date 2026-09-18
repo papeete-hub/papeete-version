@@ -1,7 +1,13 @@
 name: ci
 on: [push, pull_request]
 
-# NO CREDENTIAL. This pipeline reaches nothing outside its own checkout.
+# NO STORED CREDENTIAL. The one thing this pipeline reaches outside its own checkout is the
+# organization's package feed, and it gets in with a token minted per run: GitHub issues an OIDC
+# token, Entra trades it for an access token because a federated credential matches this run's
+# subject, and the feed accepts it for an hour. Nothing to rotate, nothing to leak.
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   build:
@@ -9,6 +15,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+
+      - uses: azure/login@v2
+        with:
+          # The consuming identity: it may resolve from the feed and pull a third-party package
+          # through its upstream, and it may not publish. Distinct from the one release.yml uses.
+          client-id: ${{ vars.AZURE_ARTIFACTS_CONSUME_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: mint a feed token
+        run: |
+          token=$(az account get-access-token \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv)
+          echo "::add-mask::$token"
+          {
+            echo "UV_INDEX_PAPEETE_USERNAME=dummy"
+            echo "UV_INDEX_PAPEETE_PASSWORD=$token"
+          } >> "$GITHUB_ENV"
+
       - name: the test suite
         run: uv run --extra dev pytest -q
       - name: build
