@@ -1,6 +1,6 @@
 [project]
 name = "papeete-version"
-version = "0.1.1"
+version = "0.1.2"
 description = "Computes one actor's version — a semver core from its own git tag, a ciType-driven label, and a short SHA — for the Papeete ecosystem."
 readme = "README.md"
 requires-python = ">=3.11"
